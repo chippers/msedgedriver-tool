@@ -101,6 +101,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+// taken from tauri-cli
 fn webview2_version() -> Result<Option<String>> {
     // check 64bit machine-wide installation
     let output = Command::new("powershell")
