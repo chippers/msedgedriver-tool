@@ -54,11 +54,7 @@ fn main() -> Result<()> {
     let manifest = ureq::get(MANIFEST_URL)
         .set(
             "User-Agent",
-            dbg!(concat!(
-                env!("CARGO_PKG_NAME"),
-                " ",
-                env!("CARGO_PKG_VERSION")
-            )),
+            concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION")),
         )
         .call()?
         .into_string()?;
@@ -82,11 +78,7 @@ fn main() -> Result<()> {
     ureq::get(&blob.url)
         .set(
             "User-Agent",
-            dbg!(concat!(
-                env!("CARGO_PKG_NAME"),
-                " ",
-                env!("CARGO_PKG_VERSION")
-            )),
+            concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION")),
         )
         .call()?
         .into_reader()
