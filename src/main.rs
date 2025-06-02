@@ -1,88 +1,33 @@
 use std::{
     fs::File,
     io::{BufWriter, Cursor},
-    process::{exit, Command},
+    process::Command,
 };
 
-use anyhow::Result;
-use quick_xml::de::from_str;
-use serde::Deserialize;
+use anyhow::{Context, Result};
+use ureq::http::header::USER_AGENT;
 use zip::ZipArchive;
 
-const MANIFEST_URL: &str = "https://msedgedriver.azureedge.net";
-
-#[derive(Debug, Default, Deserialize)]
-struct EnumerationResults {
-    #[serde(rename = "Blobs", default)]
-    blobs: Blobs,
-}
-
-#[derive(Debug, Default, Deserialize)]
-
-struct Blobs {
-    #[serde(rename = "Blob", default)]
-    blobs: Vec<Blob>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-
-struct Blob {
-    #[serde(rename = "Name", default)]
-    name: String,
-    #[serde(rename = "Url", default)]
-    url: String,
+/// Grab the url for the win64 Microsoft Edge WebDriver.
+fn driver_url(version: &str) -> String {
+    format!("https://msedgedriver.microsoft.com/{version}/edgedriver_win64.zip")
 }
 
 fn main() -> Result<()> {
-    let webview2_version = match webview2_version() {
-        Ok(Some(w2v)) => w2v,
-        Ok(None) => {
-            eprintln!("unable to find webview2_version");
-            exit(1);
-        }
-        Err(e) => {
-            eprintln!(
-                "unable to find webview2_version due to underlying error: {}",
-                e
-            );
-            exit(1);
-        }
-    };
+    let webview2_version =
+        webview2_version()?.context("unable to find an installed WebView2 client")?;
 
     println!("webview2 version: {}", webview2_version);
+    let driver_url = driver_url(&webview2_version);
 
-    let manifest = ureq::get(MANIFEST_URL)
-        .set(
-            "User-Agent",
-            concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION")),
-        )
+    println!("downloading win64 driver from {}", driver_url);
+    let buf = ureq::get(&driver_url)
+        .header(USER_AGENT, concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION")))
         .call()?
-        .into_string()?;
-
-    println!("writing manifest file to ./msedgedriver-manifest.xml");
-    std::fs::write("msedgedriver-manifest.xml", manifest.as_bytes())?;
-
-    let results: EnumerationResults = from_str(&manifest)?;
-    let name_to_find = format!("{}/edgedriver_win64.zip", webview2_version.trim());
-
-    println!("searching manifest for {}", name_to_find);
-    let blob = results
-        .blobs
-        .blobs
-        .into_iter()
-        .find(|b| b.name == name_to_find)
-        .expect("could not find matching edgedriver version");
-
-    println!("downloading found zip file");
-    let mut buf = Vec::new();
-    ureq::get(&blob.url)
-        .set(
-            "User-Agent",
-            concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION")),
-        )
-        .call()?
-        .into_reader()
-        .read_to_end(&mut buf)?;
+        .into_body()
+        .with_config()
+        .limit(100 * 1024 * 1024) // limit to 100MiB instead of default 10MiB
+        .read_to_vec()?;
 
     println!("extracting msedgedriver.exe from downloaded zip archive");
     let mut archive = ZipArchive::new(Cursor::new(buf))?;
@@ -93,38 +38,53 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-// taken from tauri-cli
+macro_rules! registry_path {
+    ($prefix:literal) => {
+        concat!($prefix, "Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}")
+    };
+}
+
+enum Webview2Install {
+    Global64,
+    Global32,
+    User64,
+    User32,
+}
+
+impl Webview2Install {
+    const ALL: &'static [Self] = &[Self::Global64, Self::Global32, Self::User64, Self::User32];
+
+    fn registry_path(&self) -> &'static str {
+        match self {
+            Webview2Install::Global64 => registry_path!("HKLM:\\SOFTWARE\\WOW6432Node\\"),
+            Webview2Install::Global32 => registry_path!("HKLM:\\SOFTWARE\\"),
+            Webview2Install::User64 => registry_path!("HKCU:\\SOFTWARE\\WOW6432Node\\"),
+            Webview2Install::User32 => registry_path!("HKCU:\\SOFTWARE\\"),
+        }
+    }
+}
+
 fn webview2_version() -> Result<Option<String>> {
-    // check 64bit machine-wide installation
-    let output = Command::new("powershell")
-        .args(&["-NoProfile", "-Command"])
-        .arg("Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' | ForEach-Object {$_.pv}")
-        .output()?;
-    if output.status.success() {
-        return Ok(Some(
-            String::from_utf8_lossy(&output.stdout).replace('\n', ""),
-        ));
-    }
-    // check 32bit machine-wide installation
-    let output = Command::new("powershell")
-          .args(&["-NoProfile", "-Command"])
-          .arg("Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' | ForEach-Object {$_.pv}")
-          .output()?;
-    if output.status.success() {
-        return Ok(Some(
-            String::from_utf8_lossy(&output.stdout).replace('\n', ""),
-        ));
-    }
-    // check user-wide installation
-    let output = Command::new("powershell")
-        .args(&["-NoProfile", "-Command"])
-        .arg("Get-ItemProperty -Path 'HKCU:\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' | ForEach-Object {$_.pv}")
-        .output()?;
-    if output.status.success() {
-        return Ok(Some(
-            String::from_utf8_lossy(&output.stdout).replace('\n', ""),
-        ));
+    for install in Webview2Install::ALL {
+        if let Some(version) = pwsh_get_webview2_registry(install.registry_path())? {
+            return Ok(Some(version));
+        }
     }
 
     Ok(None)
+}
+
+fn pwsh_get_webview2_registry(registry_path: &str) -> Result<Option<String>> {
+    Command::new("powershell")
+        .arg("-NoProfile")
+        .arg("-Command")
+        .arg(format!("Get-ItemProperty -Path '{registry_path}' | ForEach-Object {{$_.pv}}"))
+        .output()
+        .context("unable to run powershell command to grab webview2 version")
+        .map(|output| {
+            output
+                .status
+                .success()
+                .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        })
 }
