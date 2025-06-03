@@ -83,8 +83,9 @@ fn main() -> Result<(), Error> {
     println!("downloading {platform} driver from {driver_url}");
     let archive = fetch(&driver_url)?;
 
-    println!("extracting msedgedriver.exe from downloaded zip archive");
-    extract_msedgedriver(archive)?;
+    let filename = if OS == "windows" { "msedgedriver.exe" } else { "msedgedriver" };
+    println!("extracting {filename} from downloaded zip archive");
+    extract(archive, filename)?;
 
     Ok(())
 }
@@ -99,8 +100,7 @@ fn fetch(driver_url: &str) -> Result<Vec<u8>, Error> {
         .read_to_vec()?)
 }
 
-fn extract_msedgedriver(archive: Vec<u8>) -> Result<(), Error> {
-    let filename = if OS == "windows" { "msedgedriver.exe" } else { "msedgedriver" };
+fn extract(archive: Vec<u8>, filename: &str) -> Result<(), Error> {
     let mut archive = ZipArchive::new(Cursor::new(archive))?;
     let mut driver = archive.by_name(filename)?;
     let mut writer = BufWriter::new(File::create(filename)?);
