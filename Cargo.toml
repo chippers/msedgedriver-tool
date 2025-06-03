@@ -1,10 +1,17 @@
 [package]
 name = "msedgedriver-tool"
-version = "0.2.0"
+version = "0.2.1"
 license = "Apache-2.0 OR MIT"
 edition = "2024"
 
 [dependencies]
-anyhow = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
-zip = { version = "4", default-features = false, features = ["deflate"] }
+zip = { version = "4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[profile.crunch]
+inherits = "release"
+codegen-units = 1
+lto = true
+strip = "symbols"
+panic = "abort"
+opt-level = "z"
